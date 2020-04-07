@@ -131,6 +131,9 @@ static const char *const ctlidstr[] = {
 #ifdef AOM_CTRL_AV1E_SET_ENABLE_INTRABC
     [AV1E_SET_ENABLE_INTRABC]   = "AV1E_SET_ENABLE_INTRABC",
 #endif
+#ifdef AOM_CTRL_AV1E_SET_LOSSLESS
+    [AV1E_SET_LOSSLESS]   = "AOM_CTRL_AV1E_SET_LOSSLESS",
+#endif
     [AV1E_SET_ENABLE_CDEF]      = "AV1E_SET_ENABLE_CDEF",
 };
 
@@ -587,6 +590,8 @@ static av_cold int aom_init(AVCodecContext *avctx,
     if (avctx->rc_min_rate == avctx->rc_max_rate &&
         avctx->rc_min_rate == avctx->bit_rate && avctx->bit_rate) {
         enccfg.rc_end_usage = AOM_CBR;
+    } else if (ctx->crf == 0) {
+        enccfg.rc_end_usage = AOM_Q;
     } else if (ctx->crf >= 0) {
         enccfg.rc_end_usage = AOM_CQ;
         if (!avctx->bit_rate)
@@ -717,9 +722,12 @@ static av_cold int aom_init(AVCodecContext *avctx,
         codecctl_int(avctx, AV1E_SET_ENABLE_RESTORATION, ctx->enable_restoration);
 
     codecctl_int(avctx, AOME_SET_STATIC_THRESHOLD, ctx->static_thresh);
-    if (ctx->crf >= 0)
+    if (ctx->crf >= 0) {
         codecctl_int(avctx, AOME_SET_CQ_LEVEL,          ctx->crf);
-
+#ifdef AOM_CTRL_AV1E_SET_LOSSLESS
+        codecctl_int(avctx, AV1E_SET_LOSSLESS, ctx->crf == 0);
+#endif
+    }
     codecctl_int(avctx, AV1E_SET_COLOR_PRIMARIES, avctx->color_primaries);
     codecctl_int(avctx, AV1E_SET_MATRIX_COEFFICIENTS, avctx->colorspace);
     codecctl_int(avctx, AV1E_SET_TRANSFER_CHARACTERISTICS, avctx->color_trc);
