@@ -154,7 +154,7 @@ static av_cold void dump_enc_cfg(AVCodecContext *avctx,
     av_log(avctx, level, "aom_codec_enc_cfg\n");
     av_log(avctx, level, "generic settings\n"
                          "  %*s%u\n  %*s%u\n  %*s%u\n  %*s%u\n  %*s%u\n"
-                         "  %*s%u\n  %*s%u\n"
+                         "  %*s%u\n  %*s%u\n  %*s%u\n"
                          "  %*s{%u/%u}\n  %*s%u\n  %*s%d\n  %*s%u\n",
            width, "g_usage:",           cfg->g_usage,
            width, "g_threads:",         cfg->g_threads,
@@ -163,6 +163,7 @@ static av_cold void dump_enc_cfg(AVCodecContext *avctx,
            width, "g_h:",               cfg->g_h,
            width, "g_bit_depth:",       cfg->g_bit_depth,
            width, "g_input_bit_depth:", cfg->g_input_bit_depth,
+           width, "monochrome:",        cfg->monochrome,
            width, "g_timebase:",        cfg->g_timebase.num, cfg->g_timebase.den,
            width, "g_error_resilient:", cfg->g_error_resilient,
            width, "g_pass:",            cfg->g_pass,
@@ -276,6 +277,25 @@ static int set_pix_fmt(AVCodecContext *avctx, aom_codec_caps_t codec_caps,
     AOMContext av_unused *ctx = avctx->priv_data;
     enccfg->g_bit_depth = enccfg->g_input_bit_depth = 8;
     switch (avctx->pix_fmt) {
+    case AV_PIX_FMT_GRAY8:
+        enccfg->monochrome = 1u;
+        enccfg->g_profile = FF_PROFILE_AV1_MAIN;
+        *img_fmt = AOM_IMG_FMT_I420;
+        return 0;
+    case AV_PIX_FMT_GRAY10:
+    case AV_PIX_FMT_GRAY12:
+        if (codec_caps & AOM_CODEC_CAP_HIGHBITDEPTH) {
+            enccfg->monochrome = 1u;
+            enccfg->g_profile =
+                avctx->pix_fmt == AV_PIX_FMT_GRAY10 ? FF_PROFILE_AV1_MAIN
+                                                    : FF_PROFILE_AV1_PROFESSIONAL;
+            enccfg->g_bit_depth = enccfg->g_input_bit_depth =
+                avctx->pix_fmt == AV_PIX_FMT_GRAY10 ? 10 : 12;
+            *img_fmt = AOM_IMG_FMT_I42016;
+            *flags |= AOM_CODEC_USE_HIGHBITDEPTH;
+            return 0;
+        }
+        break;
     case AV_PIX_FMT_YUV420P:
         enccfg->g_profile = FF_PROFILE_AV1_MAIN;
         *img_fmt = AOM_IMG_FMT_I420;
@@ -979,12 +999,25 @@ static int aom_encode(AVCodecContext *avctx, AVPacket *pkt,
 
     if (frame) {
         rawimg                      = &ctx->rawimg;
-        rawimg->planes[AOM_PLANE_Y] = frame->data[0];
-        rawimg->planes[AOM_PLANE_U] = frame->data[1];
-        rawimg->planes[AOM_PLANE_V] = frame->data[2];
-        rawimg->stride[AOM_PLANE_Y] = frame->linesize[0];
-        rawimg->stride[AOM_PLANE_U] = frame->linesize[1];
-        rawimg->stride[AOM_PLANE_V] = frame->linesize[2];
+        if (frame->format == AV_PIX_FMT_GRAY8 ||
+            frame->format == AV_PIX_FMT_GRAY10 ||
+            frame->format == AV_PIX_FMT_GRAY12) {
+            rawimg->monochrome = 1;
+            rawimg->planes[AOM_PLANE_Y] = frame->data[0];
+            rawimg->planes[AOM_PLANE_U] = frame->data[0];
+            rawimg->planes[AOM_PLANE_V] = frame->data[0];
+            rawimg->stride[AOM_PLANE_Y] = frame->linesize[0];
+            rawimg->stride[AOM_PLANE_U] = frame->linesize[0];
+            rawimg->stride[AOM_PLANE_V] = frame->linesize[0];
+        } else {
+            rawimg->monochrome = 0;
+            rawimg->planes[AOM_PLANE_Y] = frame->data[0];
+            rawimg->planes[AOM_PLANE_U] = frame->data[1];
+            rawimg->planes[AOM_PLANE_V] = frame->data[2];
+            rawimg->stride[AOM_PLANE_Y] = frame->linesize[0];
+            rawimg->stride[AOM_PLANE_U] = frame->linesize[1];
+            rawimg->stride[AOM_PLANE_V] = frame->linesize[2];
+        }
         timestamp                   = frame->pts;
         switch (frame->color_range) {
         case AVCOL_RANGE_MPEG:
@@ -1025,6 +1058,7 @@ static int aom_encode(AVCodecContext *avctx, AVPacket *pkt,
 }
 
 static const enum AVPixelFormat av1_pix_fmts[] = {
+    AV_PIX_FMT_GRAY8,
     AV_PIX_FMT_YUV420P,
     AV_PIX_FMT_YUV422P,
     AV_PIX_FMT_YUV444P,
@@ -1032,6 +1066,9 @@ static const enum AVPixelFormat av1_pix_fmts[] = {
 };
 
 static const enum AVPixelFormat av1_pix_fmts_highbd[] = {
+    AV_PIX_FMT_GRAY8,
+    AV_PIX_FMT_GRAY10,
+    AV_PIX_FMT_GRAY12,
     AV_PIX_FMT_YUV420P,
     AV_PIX_FMT_YUV422P,
     AV_PIX_FMT_YUV444P,
